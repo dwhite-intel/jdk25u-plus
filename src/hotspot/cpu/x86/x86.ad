@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2011, 2025, Oracle and/or its affiliates. All rights reserved.
+// Copyright (c) 2011, 2026, Oracle and/or its affiliates. All rights reserved.
 // DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 //
 // This code is free software; you can redistribute it and/or modify it
@@ -1201,9 +1201,9 @@ public:
     Flag_clears_zero_flag     = Node::_last_flag << 9,
     Flag_clears_overflow_flag = Node::_last_flag << 10,
     Flag_clears_sign_flag     = Node::_last_flag << 11,
-    Flag_ndd_demotable        = Node::_last_flag << 12,
-    Flag_ndd_demotable_commutative = Node::_last_flag << 13,
-    _last_flag                = Flag_ndd_demotable_commutative
+    Flag_ndd_demotable_opr1   = Node::_last_flag << 12,
+    Flag_ndd_demotable_opr2   = Node::_last_flag << 13,
+    _last_flag                = Flag_ndd_demotable_opr2
   };
 };
 
