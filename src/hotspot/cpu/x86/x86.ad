@@ -4389,7 +4389,7 @@ instruct ReplHF_reg(vec dst, regF src, rRegI rtmp) %{
   format %{ "replicateHF $dst, $src \t! using $rtmp as TEMP" %}
   ins_encode %{
     int vlen_enc = vector_length_encoding(this);
-    __ vmovw($rtmp$$Register, $src$$XMMRegister);
+    __ evmovw($rtmp$$Register, $src$$XMMRegister);
     __ evpbroadcastw($dst$$XMMRegister, $rtmp$$Register, vlen_enc);
   %}
   ins_pipe( pipe_slow );
@@ -6492,7 +6492,7 @@ instruct minmaxFP_reg_avx10_2(vec dst, vec a, vec b) %{
     int vlen_enc = vector_length_encoding(this);
     int opcode = this->ideal_Opcode();
     BasicType elem_bt = Matcher::vector_element_basic_type(this);
-    __ vminmax_fp(opcode, elem_bt, $dst$$XMMRegister, k0, $a$$XMMRegister, $b$$XMMRegister, vlen_enc);
+    __ vminmax_fp_avx10_2(opcode, elem_bt, $dst$$XMMRegister, k0, $a$$XMMRegister, $b$$XMMRegister, vlen_enc);
   %}
   ins_pipe( pipe_slow );
 %}
@@ -10836,9 +10836,9 @@ instruct vector_selectfrom_twovectors_reg_evex(vec index, vec src1, vec src2)
 instruct reinterpretS2HF(regF dst, rRegI src)
 %{
   match(Set dst (ReinterpretS2HF src));
-  format %{ "vmovw $dst, $src" %}
+  format %{ "evmovw $dst, $src" %}
   ins_encode %{
-    __ vmovw($dst$$XMMRegister, $src$$Register);
+    __ evmovw($dst$$XMMRegister, $src$$Register);
   %}
   ins_pipe(pipe_slow);
 %}
@@ -10846,9 +10846,9 @@ instruct reinterpretS2HF(regF dst, rRegI src)
 instruct reinterpretHF2S(rRegI dst, regF src)
 %{
   match(Set dst (ReinterpretHF2S src));
-  format %{ "vmovw $dst, $src" %}
+  format %{ "evmovw $dst, $src" %}
   ins_encode %{
-    __ vmovw($dst$$Register, $src$$XMMRegister);
+    __ evmovw($dst$$Register, $src$$XMMRegister);
     __ narrow_subword_type($dst$$Register, T_SHORT);
   %}
   ins_pipe(pipe_slow);
@@ -10903,10 +10903,11 @@ instruct scalar_minmax_HF_reg_avx10_2(regF dst, regF src1, regF src2)
   predicate(VM_Version::supports_avx10_2());
   match(Set dst (MaxHF src1 src2));
   match(Set dst (MinHF src1 src2));
+
   format %{ "scalar_min_max_fp16 $dst, $src1, $src2" %}
   ins_encode %{
-    int function = this->ideal_Opcode() == Op_MinHF ? AVX10_2_MINMAX_MIN_COMPARE_SIGN : AVX10_2_MINMAX_MAX_COMPARE_SIGN;
-    __ eminmaxsh($dst$$XMMRegister, $src1$$XMMRegister, $src2$$XMMRegister, function);
+    int opcode = this->ideal_Opcode();
+    __ sminmax_fp16_avx10_2(opcode, $dst$$XMMRegister, $src1$$XMMRegister, $src2$$XMMRegister, k0);
   %}
   ins_pipe( pipe_slow );
 %}
@@ -10917,11 +10918,12 @@ instruct scalar_minmax_HF_reg(regF dst, regF src1, regF src2, kReg ktmp, regF xt
   match(Set dst (MaxHF src1 src2));
   match(Set dst (MinHF src1 src2));
   effect(TEMP_DEF dst, TEMP ktmp, TEMP xtmp1, TEMP xtmp2);
+
   format %{ "scalar_min_max_fp16 $dst, $src1, $src2\t using $ktmp, $xtmp1 and $xtmp2 as TEMP" %}
   ins_encode %{
     int opcode = this->ideal_Opcode();
-    __ scalar_max_min_fp16(opcode, $dst$$XMMRegister, $src1$$XMMRegister, $src2$$XMMRegister, $ktmp$$KRegister,
-                           $xtmp1$$XMMRegister, $xtmp2$$XMMRegister);
+    __ sminmax_fp16(opcode, $dst$$XMMRegister, $src1$$XMMRegister, $src2$$XMMRegister, $ktmp$$KRegister,
+                    $xtmp1$$XMMRegister, $xtmp2$$XMMRegister);
   %}
   ins_pipe( pipe_slow );
 %}
@@ -11021,8 +11023,9 @@ instruct vector_minmax_HF_mem_avx10_2(vec dst, vec src1, memory src2)
   format %{ "vector_min_max_fp16_mem $dst, $src1, $src2" %}
   ins_encode %{
     int vlen_enc = vector_length_encoding(this);
-    int function =  this->ideal_Opcode() == Op_MinVHF ? AVX10_2_MINMAX_MIN_COMPARE_SIGN : AVX10_2_MINMAX_MAX_COMPARE_SIGN;
-    __ evminmaxph($dst$$XMMRegister, k0, $src1$$XMMRegister, $src2$$Address, true, function, vlen_enc);
+    int opcode = this->ideal_Opcode();
+    __ vminmax_fp16_avx10_2(opcode, $dst$$XMMRegister, $src1$$XMMRegister, $src2$$Address,
+                            k0, vlen_enc);
   %}
   ins_pipe( pipe_slow );
 %}
@@ -11035,8 +11038,9 @@ instruct vector_minmax_HF_reg_avx10_2(vec dst, vec src1, vec src2)
   format %{ "vector_min_max_fp16 $dst, $src1, $src2" %}
   ins_encode %{
     int vlen_enc = vector_length_encoding(this);
-    int function =  this->ideal_Opcode() == Op_MinVHF ? AVX10_2_MINMAX_MIN_COMPARE_SIGN : AVX10_2_MINMAX_MAX_COMPARE_SIGN;
-    __ evminmaxph($dst$$XMMRegister, k0, $src1$$XMMRegister, $src2$$XMMRegister, true, function, vlen_enc);
+    int opcode = this->ideal_Opcode();
+    __ vminmax_fp16_avx10_2(opcode, $dst$$XMMRegister, $src1$$XMMRegister, $src2$$XMMRegister,
+                            k0, vlen_enc);
   %}
   ins_pipe( pipe_slow );
 %}
@@ -11051,8 +11055,8 @@ instruct vector_minmax_HF_reg(vec dst, vec src1, vec src2, kReg ktmp, vec xtmp1,
   ins_encode %{
     int vlen_enc = vector_length_encoding(this);
     int opcode = this->ideal_Opcode();
-    __ vector_max_min_fp16(opcode, $dst$$XMMRegister, $src2$$XMMRegister, $src1$$XMMRegister, $ktmp$$KRegister,
-                           $xtmp1$$XMMRegister, $xtmp2$$XMMRegister, vlen_enc);
+    __ vminmax_fp16(opcode, $dst$$XMMRegister, $src2$$XMMRegister, $src1$$XMMRegister, $ktmp$$KRegister,
+                    $xtmp1$$XMMRegister, $xtmp2$$XMMRegister, vlen_enc);
   %}
   ins_pipe( pipe_slow );
 %}
