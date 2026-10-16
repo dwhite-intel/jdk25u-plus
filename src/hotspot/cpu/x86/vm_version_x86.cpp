@@ -1098,7 +1098,7 @@ void VM_Version::get_processor_features() {
         warning("APX instructions are not available on this CPU");
       }
       FLAG_SET_DEFAULT(UseAPX, false);
-    }    // Currently APX support is only enabled for targets supporting AVX512VL feature.
+    }
   }
 
   if (FLAG_IS_DEFAULT(IntelJccErratumMitigation)) {
