@@ -1100,7 +1100,15 @@ void VM_Version::get_processor_features() {
       FLAG_SET_DEFAULT(UseAPX, false);
     }
   }
-
+#if defined(COMPILER2)
+  if (UseAPX) {
+    // Increase InlineSmallCode by 10%
+    if (FLAG_IS_DEFAULT(InlineSmallCode)) {
+      FLAG_SET_DEFAULT(InlineSmallCode, InlineSmallCode * 1.10);
+    }
+  }
+#endif
+  
   if (FLAG_IS_DEFAULT(IntelJccErratumMitigation)) {
     _has_intel_jcc_erratum = compute_has_intel_jcc_erratum();
     FLAG_SET_ERGO(IntelJccErratumMitigation, _has_intel_jcc_erratum);
