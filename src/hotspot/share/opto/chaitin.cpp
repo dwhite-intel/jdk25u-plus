@@ -1456,6 +1456,62 @@ static OptoReg::Name find_first_set(LRG &lrg, RegMask mask, int chunk) {
   return assigned;
 }
 
+OptoReg::Name PhaseChaitin::select_bias_lrg_color(LRG& lrg, int chunk) {
+  uint bias_lrg1_idx = _lrg_map.find(lrg._copy_bias);
+  uint bias_lrg2_idx = _lrg_map.find(lrg._copy_bias2);
+
+  // If bias_lrg1 has a color
+  if (bias_lrg1_idx != 0 && !_ifg->_yanked->test(bias_lrg1_idx)) {
+    OptoReg::Name reg = lrgs(bias_lrg1_idx).reg();
+    //  and it is legal for lrg
+    if (is_legal_reg(lrg, reg, chunk)) {
+      return reg;
+    }
+  }
+
+  // If bias_lrg2 has a color
+  if (bias_lrg2_idx != 0 && !_ifg->_yanked->test(bias_lrg2_idx)) {
+    OptoReg::Name reg = lrgs(bias_lrg2_idx).reg();
+    //  and it is legal for lrg
+    if (is_legal_reg(lrg, reg, chunk)) {
+      return reg;
+    }
+  }
+
+  uint bias_lrg_idx = 0;
+  if (bias_lrg1_idx != 0 && bias_lrg2_idx != 0) {
+    // Since none of the bias live ranges are part of the IFG yet, constrain the
+    // definition mask with the bias live range with the least degrees of
+    // freedom. This will increase the chances of register sharing once the bias
+    // live range becomes part of the IFG.
+    lrgs(bias_lrg1_idx).compute_set_mask_size();
+    lrgs(bias_lrg2_idx).compute_set_mask_size();
+    bias_lrg_idx = lrgs(bias_lrg1_idx).degrees_of_freedom() >
+                           lrgs(bias_lrg2_idx).degrees_of_freedom()
+                       ? bias_lrg2_idx
+                       : bias_lrg1_idx;
+  } else if (bias_lrg1_idx != 0) {
+    bias_lrg_idx = bias_lrg1_idx;
+  } else if (bias_lrg2_idx != 0) {
+    bias_lrg_idx = bias_lrg2_idx;
+  }
+
+  // Constrain the register mask of definition live range using bias mask
+  // only for the first chunk; later chunks are used for allocation from
+  // stack slots. CLAUDE AI MERGE:
+  if (bias_lrg_idx != 0 && chunk == 0) {
+    // Choose a color which is legal for bias_lrg
+    RegMask tempmask = lrg.mask();
+    tempmask.AND(lrgs(bias_lrg_idx).mask());
+    tempmask.clear_to_sets(lrg.num_regs());
+    OptoReg::Name reg = find_first_set(lrg, tempmask, chunk);
+    if (OptoReg::is_valid(reg)) {
+      return reg;
+    }
+  }
+  return OptoReg::Bad;
+}
+
 // Choose a color using the biasing heuristic
 OptoReg::Name PhaseChaitin::bias_color( LRG &lrg, int chunk ) {
 
@@ -1476,23 +1532,10 @@ OptoReg::Name PhaseChaitin::bias_color( LRG &lrg, int chunk ) {
     }
   }
 
-  uint copy_lrg = _lrg_map.find(lrg._copy_bias);
-  if (copy_lrg != 0) {
-    // If he has a color,
-    if(!_ifg->_yanked->test(copy_lrg)) {
-      OptoReg::Name reg = lrgs(copy_lrg).reg();
-      //  And it is legal for you,
-      if (is_legal_reg(lrg, reg, chunk))
-        return reg;
-    } else if( chunk == 0 ) {
-      // Choose a color which is legal for him
-      RegMask tempmask = lrg.mask();
-      tempmask.AND(lrgs(copy_lrg).mask());
-      tempmask.clear_to_sets(lrg.num_regs());
-      OptoReg::Name reg = find_first_set(lrg, tempmask, chunk);
-      if (OptoReg::is_valid(reg))
-        return reg;
-    }
+  // Try biasing the color with non-interfering bias live range[s].
+  OptoReg::Name reg = select_bias_lrg_color(lrg, chunk);
+  if (OptoReg::is_valid(reg)) {
+    return reg;
   }
 
   // If no bias info exists, just go with the register selection ordering
@@ -1504,7 +1547,7 @@ OptoReg::Name PhaseChaitin::bias_color( LRG &lrg, int chunk ) {
   // CNC - Fun hack.  Alternate 1st and 2nd selection.  Enables post-allocate
   // copy removal to remove many more copies, by preventing a just-assigned
   // register from being repeatedly assigned.
-  OptoReg::Name reg = lrg.mask().find_first_elem();
+  reg = lrg.mask().find_first_elem();
   if( (++_alternate & 1) && OptoReg::is_valid(reg) ) {
     // This 'Remove; find; Insert' idiom is an expensive way to find the
     // SECOND element in the mask.
@@ -1617,6 +1660,27 @@ uint PhaseChaitin::Select( ) {
         }
       }
     }
+
+    Node* def = lrg->_def;
+    if (lrg->is_singledef() && !lrg->_is_bound && def->is_Mach()) {
+      MachNode* mdef = def->as_Mach();
+      if (Matcher::is_register_biasing_candidate(mdef, 1)) {
+        Node* in1 = mdef->in(mdef->operand_index(1));
+        if (in1 != nullptr && lrg->_copy_bias == 0) {
+          lrg->_copy_bias = _lrg_map.find(in1);
+        }
+      }
+
+      // For commutative operations, def allocation can also be
+      // biased towards LRG of second input's def.
+      if (Matcher::is_register_biasing_candidate(mdef, 2)) {
+        Node* in2 = mdef->in(mdef->operand_index(2));
+        if (in2 != nullptr && lrg->_copy_bias2 == 0) {
+          lrg->_copy_bias2 = _lrg_map.find(in2);
+        }
+      }
+    }
+
     //assert(is_allstack == lrg->mask().is_AllStack(), "nbrs must not change AllStackedness");
     // Aligned pairs need aligned masks
     assert(!lrg->_is_vector || !lrg->_fat_proj, "sanity");
